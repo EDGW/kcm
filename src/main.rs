@@ -166,6 +166,10 @@ struct ListOptions {
     /// Increase detail; use -vv for paths and full container identifiers.
     #[arg(short, long, action = ArgAction::Count)]
     verbose: u8,
+
+    /// Include outgoing targets and all incoming-link sources.
+    #[arg(long)]
+    link_info: bool,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -500,7 +504,7 @@ fn print_link_list(path: &Path, options: ListOptions) -> Result<()> {
 }
 
 fn print_entry_list(entries: Vec<ContainerEntryInfo>, options: &ListOptions) -> Result<()> {
-    if options.verbose == 0 {
+    if options.verbose == 0 && !options.link_info {
         let keys = entries
             .into_iter()
             .map(|entry| entry.key)
@@ -518,12 +522,12 @@ fn print_entry_list(entries: Vec<ContainerEntryInfo>, options: &ListOptions) -> 
     if options.json {
         let values = entries
             .iter()
-            .map(|entry| entry_json(entry, options.verbose))
+            .map(|entry| entry_json(entry, options))
             .collect::<Vec<_>>();
         println!("{}", serde_json::to_string_pretty(&values)?);
     } else {
         for entry in &entries {
-            println!("{}", entry_text(entry, options.verbose));
+            println!("{}", entry_text(entry, options));
         }
     }
     Ok(())
@@ -537,24 +541,33 @@ fn entry_kind(link: &LinkInfo) -> &'static str {
     }
 }
 
-fn entry_text(entry: &ContainerEntryInfo, detail: u8) -> String {
-    let summary = match &entry.link {
-        LinkInfo::None => format!("{}\ttype=local", entry.key),
-        LinkInfo::LinkTo {
-            target_key,
-            container_path,
-            ..
-        } => format!(
+fn entry_text(entry: &ContainerEntryInfo, options: &ListOptions) -> String {
+    let detail = options.verbose;
+    let summary = match (&entry.link, options.link_info) {
+        (LinkInfo::None, true) => format!("{}\ttype=local\tlink=none", entry.key),
+        (LinkInfo::None, false) => format!("{}\ttype=local", entry.key),
+        (
+            LinkInfo::LinkTo {
+                target_key,
+                container_path,
+                ..
+            },
+            true,
+        ) => format!(
             "{}\ttype=link-to\ttarget={}:{}",
             entry.key,
             container_path.display(),
             target_key
         ),
-        LinkInfo::LinkFrom { linkers } => format!(
+        (LinkInfo::LinkTo { .. }, false) => format!("{}\ttype=link-to", entry.key),
+        (LinkInfo::LinkFrom { linkers }, true) => format!(
             "{}\ttype=local-linked-from\tsources={}",
             entry.key,
             linkers.len()
         ),
+        (LinkInfo::LinkFrom { .. }, false) => {
+            format!("{}\ttype=local-linked-from", entry.key)
+        }
     };
     if detail < 2 {
         return summary;
@@ -567,11 +580,11 @@ fn entry_text(entry: &ContainerEntryInfo, detail: u8) -> String {
         "{summary}\tfilepath={}\tsize={size}",
         entry.filepath.display()
     );
-    match &entry.link {
-        LinkInfo::LinkTo { container_uid, .. } => {
+    match (&entry.link, options.link_info) {
+        (LinkInfo::LinkTo { container_uid, .. }, true) => {
             full.push_str(&format!("\ttarget_uid={container_uid}"));
         }
-        LinkInfo::LinkFrom { linkers } => {
+        (LinkInfo::LinkFrom { linkers }, true) => {
             for (index, linker) in linkers.iter().enumerate() {
                 full.push_str(&format!(
                     "\tsource[{index}]={}:{}",
@@ -579,30 +592,34 @@ fn entry_text(entry: &ContainerEntryInfo, detail: u8) -> String {
                 ));
             }
         }
-        LinkInfo::None => {}
+        _ => {}
     }
     full
 }
 
-fn entry_json(entry: &ContainerEntryInfo, detail: u8) -> serde_json::Value {
+fn entry_json(entry: &ContainerEntryInfo, options: &ListOptions) -> serde_json::Value {
+    let detail = options.verbose;
     let mut value = json!({
         "key": entry.key,
         "type": entry_kind(&entry.link),
     });
     let object = value.as_object_mut().expect("entry JSON is an object");
-    match &entry.link {
-        LinkInfo::LinkTo {
-            target_key,
-            container_path,
-            container_uid,
-        } => {
+    match (&entry.link, options.link_info) {
+        (
+            LinkInfo::LinkTo {
+                target_key,
+                container_path,
+                container_uid,
+            },
+            true,
+        ) => {
             object.insert("target_key".into(), json!(target_key));
             object.insert("container_path".into(), json!(container_path));
             if detail >= 2 {
                 object.insert("container_uid".into(), json!(container_uid));
             }
         }
-        LinkInfo::LinkFrom { linkers } => {
+        (LinkInfo::LinkFrom { linkers }, true) => {
             if detail >= 2 {
                 object.insert(
                     "sources".into(),
@@ -620,7 +637,7 @@ fn entry_json(entry: &ContainerEntryInfo, detail: u8) -> serde_json::Value {
                 object.insert("source_count".into(), json!(linkers.len()));
             }
         }
-        LinkInfo::None => {}
+        _ => {}
     }
     if detail >= 2 {
         object.insert("filepath".into(), json!(entry.filepath));
@@ -952,6 +969,7 @@ mod tests {
             "-vv",
             "--json",
             "--auto-fix",
+            "--link-info",
         ])
         .unwrap();
         let Command::Container(command) = cli.command;
@@ -961,6 +979,37 @@ mod tests {
         assert_eq!(options.verbose, 2);
         assert!(options.json);
         assert!(options.auto_fix);
+        assert!(options.link_info);
+    }
+
+    #[test]
+    fn list_link_info_requires_option() {
+        let entry = ContainerEntryInfo {
+            key: "link.txt".into(),
+            filepath: PathBuf::from("link.txt"),
+            size: Some(4),
+            link: LinkInfo::LinkTo {
+                target_key: "target.txt".into(),
+                container_uid: "target-uid".into(),
+                container_path: PathBuf::from("../target"),
+            },
+        };
+        let without = ListOptions {
+            json: true,
+            auto_fix: false,
+            verbose: 2,
+            link_info: false,
+        };
+        let without_value = entry_json(&entry, &without);
+        assert!(without_value.get("target_key").is_none());
+        assert!(without_value.get("container_uid").is_none());
+        let with = ListOptions {
+            link_info: true,
+            ..without
+        };
+        let with_value = entry_json(&entry, &with);
+        assert_eq!(with_value["target_key"], "target.txt");
+        assert_eq!(with_value["container_uid"], "target-uid");
     }
 
     #[test]

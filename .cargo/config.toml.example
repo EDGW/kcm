@@ -1,0 +1,5 @@
+# Copy this file to `config.toml` for local development. Keep `config.toml`
+# untracked so CI and other clean checkouts use the Git dependency declared in
+# Cargo.toml.
+[patch."https://github.com/EDGW/kako-craft-lib"]
+kako-craft-lib = { path = "../kako-craft-lib" }

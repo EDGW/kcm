@@ -1,0 +1,10 @@
+[package]
+name = "kcm"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.5.50", features = ["derive"] }
+kako-craft-lib = { git = "https://github.com/EDGW/kako-craft-lib" }
+serde_json = "1.0.149"

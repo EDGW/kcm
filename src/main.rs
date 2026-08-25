@@ -22,6 +22,14 @@ use cli::*;
 use commands::interaction::is_unavailable_link_error;
 use commands::run;
 
+/// Parses one process invocation, executes it, and enforces the CLI exit-code contract.
+///
+/// # Returns
+///
+/// Returns normally with implicit process status `0` after successful logging initialization and
+/// command execution. On failure, prints the complete error chain to stderr and terminates the
+/// process with status `1` for ordinary or broken-link failures, `2` for invalid validation input,
+/// or `3` for temporary container unavailability.
 fn main() {
     let cli = Cli::parse();
     if let Err(error) = initialize_logging(cli.log_level).and_then(|()| run(cli)) {

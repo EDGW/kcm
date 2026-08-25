@@ -1,3 +1,5 @@
+//! Human-readable and JSON rendering for container metadata, lists, and link information.
+
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -17,6 +19,21 @@ pub(crate) use validation::{validation_issue_kind, validation_json};
 use super::interaction::{run_check_interaction, validations_need_fix, with_auto_fix};
 use super::open_link;
 
+/// Loads and prints common container metadata plus a link container's path preference.
+///
+/// # Arguments
+///
+/// * `path` - Container root whose authoritative metadata is loaded.
+/// * `as_json` - When `true`, emit one pretty JSON object; when `false`, emit labeled text lines.
+///
+/// # Returns
+///
+/// `Ok(())` after metadata and any link-specific `prefer_relative` value are printed.
+///
+/// # Errors
+///
+/// Returns an error when metadata cannot be loaded, a declared link container cannot be opened or
+/// locked, its outgoing metadata cannot be read, or JSON serialization fails.
 pub(crate) fn print_info(path: &Path, as_json: bool) -> Result<()> {
     let metadata = ContainerMetadata::load(path)?;
     let prefer_relative = if metadata.kind == "link" {
@@ -49,18 +66,80 @@ pub(crate) fn print_info(path: &Path, as_json: bool) -> Result<()> {
     Ok(())
 }
 
+/// Lists all ordinary and outgoing-link entries using the requested detail and validation options.
+///
+/// # Arguments
+///
+/// * `path` - Root of any supported container kind.
+/// * `options` - JSON, verbosity, link-info, peer-validation, and auto-fix controls.
+///
+/// # Returns
+///
+/// `Ok(())` after entries and requested details are rendered and all validations are successful.
+///
+/// # Errors
+///
+/// Returns an error for container access, listing, validation, interaction, serialization, or a
+/// broken or unavailable validation result.
 pub(crate) fn print_container_list(path: &Path, options: ListOptions) -> Result<()> {
     print_list(path, options, || open_container(path)?.list_info())
 }
 
+/// Lists only outgoing-link entries from a link container.
+///
+/// # Arguments
+///
+/// * `path` - Root required to declare concrete kind `link`.
+/// * `options` - JSON, verbosity, link-info, peer-validation, and auto-fix controls.
+///
+/// # Returns
+///
+/// `Ok(())` after outgoing entries are rendered and all requested validations succeed.
+///
+/// # Errors
+///
+/// Returns an error for kind mismatch, container access, listing, validation, interaction,
+/// serialization, or a broken or unavailable validation result.
 pub(crate) fn print_link_list(path: &Path, options: ListOptions) -> Result<()> {
     print_list(path, options, || open_link(path)?.link_list_info())
 }
 
+/// Lists only ordinary local entries from a link container.
+///
+/// # Arguments
+///
+/// * `path` - Root required to declare concrete kind `link`.
+/// * `options` - JSON, verbosity, incoming-link info, peer-validation, and auto-fix controls.
+///
+/// # Returns
+///
+/// `Ok(())` after ordinary entries are rendered and all requested validations succeed.
+///
+/// # Errors
+///
+/// Returns an error for kind mismatch, container access, listing, validation, interaction,
+/// serialization, or a broken or unavailable validation result.
 pub(crate) fn print_local_list(path: &Path, options: ListOptions) -> Result<()> {
     print_list(path, options, || open_link(path)?.local_list_info())
 }
 
+/// Coordinates list loading, optional repair, validation, reload, and final rendering.
+///
+/// # Arguments
+///
+/// * `path` - Current container root used for validation and interactive repair.
+/// * `options` - Detail, output, link-info, corresponding-peer, and auto-fix policy.
+/// * `load` - Repeatable operation that returns the exact entry subset for this list command.
+///
+/// # Returns
+///
+/// `Ok(())` after a simple key list or detailed entries are printed and validation status permits a
+/// successful exit.
+///
+/// # Errors
+///
+/// Returns an error when loading, auto-fix, peer validation, post-repair reload, rendering, or
+/// validation-success enforcement fails.
 fn print_list(
     path: &Path,
     options: ListOptions,
@@ -79,6 +158,23 @@ fn print_list(
     render_entry_list(entries, &options, validations)
 }
 
+/// Renders preloaded entries as plain keys, detailed text rows, or structured JSON.
+///
+/// # Arguments
+///
+/// * `entries` - Ordered entry records to render.
+/// * `options` - Output format, verbosity, and link-info controls.
+/// * `validations` - Per-entry reports aligned by index with `entries`; detailed callers supply one
+///   `Some` or `None` slot per entry.
+///
+/// # Returns
+///
+/// `Ok(())` after output is emitted and all present reports have no broken or unavailable items.
+///
+/// # Errors
+///
+/// Returns an error when JSON serialization fails or aggregate validation requires a nonzero CLI
+/// outcome.
 fn render_entry_list(
     entries: Vec<ContainerEntryInfo>,
     options: &ListOptions,
@@ -114,6 +210,25 @@ fn render_entry_list(
     ensure_validation_success(validations.iter().flatten())
 }
 
+/// Produces one optional validation report for every listed entry.
+///
+/// # Arguments
+///
+/// * `path` - Current container root to open and lock while snapshots are validated.
+/// * `entries` - Ordered entry records whose keys determine validation subjects.
+/// * `validate_with` - Explicit corresponding container roots. When empty, only outgoing entries
+///   are validated against their recorded targets; when nonempty, every entry is checked against
+///   all supplied peers.
+///
+/// # Returns
+///
+/// A vector aligned with `entries`: `Some(report)` for each validated key and `None` for an ordinary
+/// key skipped during recorded-target-only validation.
+///
+/// # Errors
+///
+/// Returns an error when current or corresponding containers cannot be opened or locked, snapshots
+/// cannot be read, or the library rejects or fails the validation run.
 fn validate_entries(
     path: &Path,
     entries: &[ContainerEntryInfo],
@@ -160,6 +275,21 @@ fn validate_entries(
         .collect()
 }
 
+/// Opens all explicitly supplied corresponding containers in argument order.
+///
+/// # Arguments
+///
+/// * `paths` - Container roots to open as validation peers; duplicates remain available for the
+///   library's UID/path validation rules.
+///
+/// # Returns
+///
+/// One boxed concrete container per input path, preserving order.
+///
+/// # Errors
+///
+/// Returns an error identifying the first path whose metadata or concrete implementation cannot be
+/// opened.
 pub(crate) fn open_corresponding(paths: &[PathBuf]) -> Result<Vec<Box<dyn Container>>> {
     paths
         .iter()
@@ -171,6 +301,15 @@ pub(crate) fn open_corresponding(paths: &[PathBuf]) -> Result<Vec<Box<dyn Contai
         .collect()
 }
 
+/// Maps link metadata to the stable entry-type label used by list output.
+///
+/// # Arguments
+///
+/// * `link` - Entry link classification returned by the library.
+///
+/// # Returns
+///
+/// `local`, `link-to`, or `local-linked-from` according to the metadata direction.
 fn entry_kind(link: &LinkInfo) -> &'static str {
     match link {
         LinkInfo::None => "local",
@@ -179,6 +318,18 @@ fn entry_kind(link: &LinkInfo) -> &'static str {
     }
 }
 
+/// Formats one detailed list entry as a tab-separated human-readable row.
+///
+/// # Arguments
+///
+/// * `entry` - Entry key, filesystem data, and link metadata to render.
+/// * `options` - Verbosity and link-info controls determining included fields.
+/// * `validation` - Optional report used only when link-info output is enabled.
+///
+/// # Returns
+///
+/// An owned row containing the key and type, optionally link identity and validation, size at
+/// verbosity one, and paths plus full source or target UIDs at verbosity two or above.
 fn entry_text(
     entry: &ContainerEntryInfo,
     options: &ListOptions,
@@ -248,6 +399,19 @@ fn entry_text(
     full
 }
 
+/// Serializes one list entry according to verbosity and link-info controls.
+///
+/// # Arguments
+///
+/// * `entry` - Entry key, filesystem data, and link metadata to encode.
+/// * `options` - Verbosity and link-info controls determining emitted object fields.
+/// * `validation` - Optional report encoded when link-info output is enabled; absence becomes an
+///   explicit `unverified` validation object.
+///
+/// # Returns
+///
+/// A JSON object with stable key and type fields, optional target/source metadata, optional size and
+/// filepath detail, and optional validation.
 pub(crate) fn entry_json(
     entry: &ContainerEntryInfo,
     options: &ListOptions,
@@ -309,6 +473,21 @@ pub(crate) fn entry_json(
     value
 }
 
+/// Prints one entry's incoming or outgoing link metadata and optional reciprocal validation.
+///
+/// # Arguments
+///
+/// * `path` - Root of the current container containing the selected entry.
+/// * `args` - Entry key, corresponding peer paths, output format, and auto-fix policy.
+///
+/// # Returns
+///
+/// `Ok(())` after JSON or human output is emitted and any requested validation is successful.
+///
+/// # Errors
+///
+/// Returns an error for container access, link-info or validation failure, interactive repair or
+/// reload failure, JSON serialization, or a broken or unavailable final validation result.
 pub(crate) fn link_info(path: &Path, args: LinkInfoArgs) -> Result<()> {
     let mut result = collect_link_info(path, &args)?;
     if args.auto_fix
@@ -359,6 +538,22 @@ pub(crate) fn link_info(path: &Path, args: LinkInfoArgs) -> Result<()> {
     ensure_validation_success(validation.iter())
 }
 
+/// Collects link metadata and, when peers are supplied, validates it under one current writer.
+///
+/// # Arguments
+///
+/// * `path` - Current container root to open and exclusively lock.
+/// * `args` - Entry key and corresponding peer roots; rendering and auto-fix flags are ignored here.
+///
+/// # Returns
+///
+/// The selected entry's link classification and `Some(report)` when `validate_with` is nonempty, or
+/// `None` when validation was not requested.
+///
+/// # Errors
+///
+/// Returns an error when the current container or peers cannot be opened, the current writer cannot
+/// be acquired, link metadata cannot be read, or validation fails.
 fn collect_link_info(
     path: &Path,
     args: &LinkInfoArgs,
@@ -379,6 +574,16 @@ fn collect_link_info(
     Ok((info, validation))
 }
 
+/// Serializes an entry's directional link metadata independently of validation.
+///
+/// # Arguments
+///
+/// * `info` - None, outgoing target identity, or all incoming source identities.
+///
+/// # Returns
+///
+/// A JSON object tagged with `kind`: `none`, `to` with target fields, or `from` with every linker
+/// record in library-provided order.
 fn link_info_json(info: &LinkInfo) -> serde_json::Value {
     match info {
         LinkInfo::None => json!({ "kind": "none" }),

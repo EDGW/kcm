@@ -1,8 +1,11 @@
+//! Clap command tree, positional arguments, options, aliases, and value enums.
+
 use std::path::PathBuf;
 
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 use kako_craft_lib::container::EntryKey;
 
+/// Custom long-help layout grouping general, local, and link-container operations.
 const CONTAINER_HELP_TEMPLATE: &str = "\
 {about-with-newline}
 {usage-heading} {usage}
@@ -53,21 +56,29 @@ Run `kcm container help <COMMAND>` for details about a command.
     version,
     about = "Command-line wrapper for kako-craft-lib"
 )]
+/// Fully parsed top-level `kcm` invocation.
 pub(crate) struct Cli {
     /// Enable library logs at this level. Logging is disabled when omitted.
     #[arg(long, value_enum, global = true, value_name = "LEVEL")]
     pub(crate) log_level: Option<LogLevel>,
 
     #[command(subcommand)]
+    /// Selected top-level command family and its parsed arguments.
     pub(crate) command: Command,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+/// User-selectable maximum tracing verbosity.
 pub(crate) enum LogLevel {
+    /// Emit trace, debug, informational, warning, and error events.
     Trace,
+    /// Emit debug, informational, warning, and error events.
     Debug,
+    /// Emit informational, warning, and error events.
     Info,
+    /// Emit warning and error events.
     Warn,
+    /// Emit only error events.
     Error,
 }
 
@@ -84,6 +95,7 @@ impl From<LogLevel> for tracing::Level {
 }
 
 #[derive(Debug, Subcommand)]
+/// Top-level command families supported by `kcm`.
 pub(crate) enum Command {
     /// Inspect and operate on a kako-craft container.
     Container(ContainerCommand),
@@ -91,16 +103,19 @@ pub(crate) enum Command {
 
 #[derive(Debug, Args)]
 #[command(help_template = CONTAINER_HELP_TEMPLATE)]
+/// Container root followed by one structured container operation.
 pub(crate) struct ContainerCommand {
     /// Container directory. Defaults to the current directory.
     #[arg(value_name = "PATH", default_value = ".")]
     pub(crate) path: PathBuf,
 
     #[command(subcommand)]
+    /// Operation to execute against `path`.
     pub(crate) operation: ContainerOperation,
 }
 
 #[derive(Debug, Subcommand)]
+/// Complete general, local-only, and outgoing-link container command set.
 pub(crate) enum ContainerOperation {
     /// Show container metadata.
     Info(JsonOutput),
@@ -164,6 +179,7 @@ pub(crate) enum ContainerOperation {
 }
 
 #[derive(Debug, Args)]
+/// Output format shared by commands that only toggle JSON rendering.
 pub(crate) struct JsonOutput {
     /// Emit machine-readable JSON.
     #[arg(long)]
@@ -171,6 +187,7 @@ pub(crate) struct JsonOutput {
 }
 
 #[derive(Debug, Args)]
+/// Detail, validation, repair, and output controls shared by list commands.
 pub(crate) struct ListOptions {
     /// Emit machine-readable JSON.
     #[arg(long)]
@@ -200,12 +217,16 @@ pub(crate) struct ListOptions {
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
+/// Concrete container implementation accepted by `container init`.
 pub(crate) enum ContainerKind {
+    /// Ordinary filesystem container supporting entries and incoming-link records.
     Local,
+    /// Container supporting ordinary entries plus validated outgoing links.
     Link,
 }
 
 #[derive(Debug, Args)]
+/// Initialization arguments for a new local or link container.
 pub(crate) struct InitArgs {
     /// Container implementation to create.
     #[arg(value_enum, default_value = "local")]
@@ -221,6 +242,7 @@ pub(crate) struct InitArgs {
 }
 
 #[derive(Debug, Args)]
+/// Entry key and one of the supported byte-input sources for add or update.
 pub(crate) struct DataArgs {
     /// Entry key inside the container.
     pub(crate) entry: EntryKey,
@@ -235,6 +257,7 @@ pub(crate) struct DataArgs {
 }
 
 #[derive(Debug, Args)]
+/// Entry read arguments, output destination, and optional interactive recovery.
 pub(crate) struct ReadArgs {
     /// Entry key inside the container.
     pub(crate) entry: EntryKey,
@@ -249,7 +272,9 @@ pub(crate) struct ReadArgs {
 }
 
 #[derive(Debug, Args)]
+/// Single entry-key arguments used by path resolution commands.
 pub(crate) struct KeyArg {
+    /// Entry key to resolve inside the selected container namespace.
     pub(crate) entry: EntryKey,
 
     /// Interactively check and repair a broken link, then retry.
@@ -258,18 +283,24 @@ pub(crate) struct KeyArg {
 }
 
 #[derive(Debug, Args)]
+/// One-or-more entry keys removed by a single preflighted batch operation.
 pub(crate) struct RemoveArgs {
+    /// Entry keys to remove; Clap enforces that at least one value is supplied.
     #[arg(required = true)]
     pub(crate) entries: Vec<EntryKey>,
 }
 
 #[derive(Debug, Args)]
+/// Source and destination entry keys for ordinary copy and rename operations.
 pub(crate) struct TwoKeys {
+    /// Existing ordinary source entry key.
     pub(crate) from: EntryKey,
+    /// New destination entry key, which must not already be occupied.
     pub(crate) to: EntryKey,
 }
 
 #[derive(Debug, Args)]
+/// Arguments for creating an outgoing link to an ordinary target entry.
 pub(crate) struct LinkArgs {
     /// Entry key to create in this link container.
     pub(crate) linker_key: EntryKey,
@@ -294,6 +325,7 @@ pub(crate) struct LinkArgs {
 }
 
 #[derive(Debug, Args)]
+/// Arguments for removing one outgoing link and its reciprocal record.
 pub(crate) struct UnlinkArgs {
     /// Outgoing-link entry key in this link container.
     pub(crate) linker_key: EntryKey,
@@ -304,6 +336,7 @@ pub(crate) struct UnlinkArgs {
 }
 
 #[derive(Debug, Args)]
+/// Source, destination, and recovery controls for outgoing-link copy or rename.
 pub(crate) struct LinkKeysArgs {
     /// Existing outgoing-link key.
     pub(crate) from: EntryKey,
@@ -317,7 +350,9 @@ pub(crate) struct LinkKeysArgs {
 }
 
 #[derive(Debug, Args)]
+/// Entry selection, peer validation, recovery, and rendering options for link information.
 pub(crate) struct LinkInfoArgs {
+    /// Current-container entry key whose incoming or outgoing metadata is inspected.
     pub(crate) entry: EntryKey,
 
     /// Validate reciprocal metadata against one or more containers.
@@ -334,6 +369,7 @@ pub(crate) struct LinkInfoArgs {
 }
 
 #[derive(Debug, Args)]
+/// Corresponding containers supplied to an interactive full consistency check.
 pub(crate) struct CheckArgs {
     /// Check reciprocal metadata against one or more containers.
     #[arg(long, value_name = "PATH", num_args = 1.., action = ArgAction::Append)]
@@ -341,6 +377,12 @@ pub(crate) struct CheckArgs {
 }
 
 impl LinkArgs {
+    /// Converts mutually exclusive path-policy flags into the library's three-state override.
+    ///
+    /// # Returns
+    ///
+    /// `Some(true)` for `--relative`, `Some(false)` for `--absolute`, and `None` when neither flag
+    /// is present so the link container's persisted default is reused.
     pub(crate) fn prefer_relative(&self) -> Option<bool> {
         if self.relative {
             Some(true)

@@ -1,3 +1,13 @@
+//! Command-line interface for inspecting and mutating `kako-craft-lib` containers.
+//!
+//! `kcm` parses structured container commands, delegates storage and consistency
+//! operations to the library, renders human or JSON output, and maps validation
+//! outcomes to stable process exit codes.
+
+#![deny(missing_docs)]
+#![deny(rustdoc::broken_intra_doc_links)]
+#![cfg_attr(not(test), deny(clippy::missing_docs_in_private_items))]
+
 use std::fmt;
 use std::io;
 
@@ -40,6 +50,21 @@ fn main() {
     }
 }
 
+/// Installs stderr tracing when the user explicitly selects a log level.
+///
+/// # Arguments
+///
+/// * `level` - Maximum enabled verbosity, or `None` to leave tracing uninitialized and emit no
+///   library logs.
+///
+/// # Returns
+///
+/// `Ok(())` when logging is intentionally disabled or the global subscriber is installed.
+///
+/// # Errors
+///
+/// Returns an error when another global tracing subscriber has already been installed or subscriber
+/// initialization otherwise fails.
 fn initialize_logging(level: Option<LogLevel>) -> Result<()> {
     let Some(level) = level else {
         return Ok(());
@@ -52,12 +77,20 @@ fn initialize_logging(level: Option<LogLevel>) -> Result<()> {
 }
 
 #[derive(Debug)]
+/// Validation outcome translated into the CLI's stable nonzero exit-code contract.
 pub(crate) enum ValidationCommandError {
+    /// One or more persistent reciprocal-link inconsistencies; the payload is the issue count.
     Broken(usize),
+    /// One or more peer containers could not be validated; the payload is the container count.
     Unavailable(usize),
 }
 
 impl ValidationCommandError {
+    /// Maps a validation outcome to its documented process status.
+    ///
+    /// # Returns
+    ///
+    /// Exit code `1` for persistent broken relationships or `3` for temporarily unavailable peers.
     fn exit_code(&self) -> i32 {
         match self {
             Self::Broken(_) => 1,

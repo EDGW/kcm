@@ -1,3 +1,5 @@
+//! Interactive link checking, concrete repair prompts, and automatic retry handling.
+
 use std::collections::BTreeSet;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -13,15 +15,49 @@ use crate::cli::CheckArgs;
 
 use super::render::{open_corresponding, validation_issue_kind};
 
+/// Runs the explicit interactive check command and discards its internal summary.
+///
+/// # Arguments
+///
+/// * `path` - Root of the current container whose writer remains locked throughout interaction.
+/// * `args` - Corresponding container paths used for reciprocal validation and repair.
+///
+/// # Returns
+///
+/// `Ok(())` after every discovered issue has been repaired, retried, or explicitly skipped.
+///
+/// # Errors
+///
+/// Returns an error when a container cannot be opened or locked, check metadata cannot be read,
+/// terminal input/output fails, or the interaction terminates unexpectedly.
 pub(crate) fn check(path: &Path, args: CheckArgs) -> Result<()> {
     run_check_interaction(path, &args.validate_with).map(|_| ())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Summary of choices made during one complete check interaction.
 pub(crate) struct CheckInteractionOutcome {
+    /// Number of distinct issue identifiers the user explicitly left unresolved.
     skipped_issues: usize,
 }
 
+/// Opens current and corresponding containers, locks the current writer, and interacts to completion.
+///
+/// # Arguments
+///
+/// * `path` - Root of the current container whose exclusive writer is held for the entire prompt
+///   sequence.
+/// * `validate_with` - Corresponding container roots included in reciprocal validation; an empty
+///   slice still checks local outgoing metadata and materialized symlinks.
+///
+/// # Returns
+///
+/// An outcome reporting how many distinct issues the user explicitly skipped.
+///
+/// # Errors
+///
+/// Returns an error when current or corresponding containers cannot be opened, the current writer
+/// cannot be acquired, checking fails, or terminal interaction cannot complete.
 pub(crate) fn run_check_interaction(
     path: &Path,
     validate_with: &[PathBuf],
@@ -36,6 +72,16 @@ pub(crate) fn run_check_interaction(
     interact_check(writer.as_mut(), &refs)
 }
 
+/// Reports whether any available list-entry validation remains unresolved.
+///
+/// # Arguments
+///
+/// * `validations` - Per-entry optional reports; `None` means that entry was not validated.
+///
+/// # Returns
+///
+/// `true` when at least one present report contains broken or unavailable results, otherwise
+/// `false`.
 pub(crate) fn validations_need_fix(validations: &[Option<LinkValidationReport>]) -> bool {
     validations
         .iter()
@@ -43,6 +89,24 @@ pub(crate) fn validations_need_fix(validations: &[Option<LinkValidationReport>])
         .any(|report| !report.is_valid())
 }
 
+/// Rechecks, prompts for one concrete action, applies it, and repeats while one writer stays held.
+///
+/// # Arguments
+///
+/// * `writer` - Exclusive current-container guard retained across all checks, prompts, and selected
+///   repairs.
+/// * `corresponding` - Open peer containers used to validate and mutate reciprocal metadata.
+///
+/// # Returns
+///
+/// An outcome containing the number of unique issues explicitly skipped; issues are re-evaluated
+/// after every non-skip action.
+///
+/// # Errors
+///
+/// Returns an error if checking fails, stderr cannot be flushed, stdin closes or cannot be read, or
+/// an unrecoverable interaction condition occurs. Individual repair failures are displayed and
+/// reprompted rather than returned.
 fn interact_check(
     writer: &mut dyn ContainerWriteGuard,
     corresponding: &[&dyn Container],
@@ -128,6 +192,24 @@ fn interact_check(
     }
 }
 
+/// Executes an operation and optionally repairs a link-access failure before one retry.
+///
+/// # Arguments
+///
+/// * `path` - Current container root opened for the interactive repair pass.
+/// * `auto_fix` - When `true`, recognized broken or unavailable link failures trigger interaction;
+///   when `false`, the first operation error is returned unchanged.
+/// * `operation` - Repeatable closure invoked initially and, only after a fully resolved repair
+///   interaction, exactly once more.
+///
+/// # Returns
+///
+/// The closure's successful value from the first attempt or the single post-repair retry.
+///
+/// # Errors
+///
+/// Returns the original unrecognized or non-auto-fixed error, any container or interaction failure,
+/// an error when the user skips issues, or the retry error with post-repair context.
 pub(crate) fn with_auto_fix<T>(
     path: &Path,
     auto_fix: bool,
@@ -154,6 +236,16 @@ pub(crate) fn with_auto_fix<T>(
     }
 }
 
+/// Classifies whether an operation failure is eligible for interactive link repair.
+///
+/// # Arguments
+///
+/// * `error` - Operation error whose chain and top-level link mutation variants are inspected.
+///
+/// # Returns
+///
+/// `true` for persistent broken-link or temporary link-unavailability failures, including wrapped
+/// link and unlink access variants; otherwise `false`.
 fn is_repairable_link_error(error: &anyhow::Error) -> bool {
     error.chain().any(|cause| {
         cause.downcast_ref::<BrokenLinkError>().is_some()
@@ -171,6 +263,16 @@ fn is_repairable_link_error(error: &anyhow::Error) -> bool {
     )
 }
 
+/// Classifies failures that should produce the CLI's temporary-unavailability exit code.
+///
+/// # Arguments
+///
+/// * `error` - Command error whose chain and top-level link mutation variants are inspected.
+///
+/// # Returns
+///
+/// `true` for target unavailability or container writer contention, including wrapped link and
+/// unlink access errors; otherwise `false`.
 pub(crate) fn is_unavailable_link_error(error: &anyhow::Error) -> bool {
     error.chain().any(|cause| {
         cause.downcast_ref::<LinkUnavailableError>().is_some()
@@ -187,6 +289,15 @@ pub(crate) fn is_unavailable_link_error(error: &anyhow::Error) -> bool {
     )
 }
 
+/// Produces the concise issue-kind sentence displayed above repair choices.
+///
+/// # Arguments
+///
+/// * `issue` - Check issue whose filesystem, validation, or availability kind is described.
+///
+/// # Returns
+///
+/// An owned stable human-readable description without expected or actual detail fields.
 fn describe_issue(issue: &LinkCheckIssue) -> String {
     match issue.kind {
         LinkCheckKind::MissingSymlink => "metadata entry is missing its symlink",
@@ -198,6 +309,17 @@ fn describe_issue(issue: &LinkCheckIssue) -> String {
     .to_owned()
 }
 
+/// Renders one concrete repair choice using the issue's keys, identities, and paths.
+///
+/// # Arguments
+///
+/// * `issue` - Check issue providing the affected key and optional peer context.
+/// * `action` - Library repair action offered for that issue.
+///
+/// # Returns
+///
+/// A specific human-readable operation description; destructive one-sided cleanup is visibly
+/// marked dangerous and skip explicitly states that no data changes.
 pub(crate) fn check_action(issue: &LinkCheckIssue, action: CheckRepairAction) -> String {
     match action {
         CheckRepairAction::CreateMissingSymlink => format!(

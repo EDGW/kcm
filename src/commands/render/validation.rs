@@ -1,3 +1,5 @@
+//! Validation status classification, structured serialization, and report rendering.
+
 use anyhow::Result;
 use kako_craft_lib::container::{
     LinkValidationIssue, LinkValidationIssueKind, LinkValidationReport,
@@ -6,6 +8,16 @@ use serde_json::json;
 
 use crate::ValidationCommandError;
 
+/// Selects the stable aggregate status label for a validation report.
+///
+/// # Arguments
+///
+/// * `report` - Report whose broken, unavailable, valid, and ignored results are prioritized.
+///
+/// # Returns
+///
+/// `broken` when persistent issues exist, otherwise `unavailable` when peers are inaccessible,
+/// otherwise `verified` when at least one match exists, and `ignored` for an empty/ignored report.
 pub(super) fn validation_status(report: &LinkValidationReport) -> &'static str {
     if !report.broken.is_empty() {
         "broken"
@@ -18,6 +30,16 @@ pub(super) fn validation_status(report: &LinkValidationReport) -> &'static str {
     }
 }
 
+/// Serializes every validation category and ignored counter into the stable CLI JSON schema.
+///
+/// # Arguments
+///
+/// * `report` - Complete library report to serialize without consuming it.
+///
+/// # Returns
+///
+/// A JSON object containing `status`, full `valid`, `broken`, and `unavailable` arrays, plus the
+/// three ignored counters.
 pub(crate) fn validation_json(report: &LinkValidationReport) -> serde_json::Value {
     json!({
         "status": validation_status(report),
@@ -41,6 +63,16 @@ pub(crate) fn validation_json(report: &LinkValidationReport) -> serde_json::Valu
     })
 }
 
+/// Serializes one persistent inconsistency with all optional comparison context preserved.
+///
+/// # Arguments
+///
+/// * `issue` - Broken validation item to encode.
+///
+/// # Returns
+///
+/// A JSON object containing its stable kind label, both container contexts, both optional keys,
+/// and optional expected and actual values.
 fn validation_issue_json(issue: &LinkValidationIssue) -> serde_json::Value {
     json!({
         "kind": validation_issue_kind(issue.kind),
@@ -55,6 +87,15 @@ fn validation_issue_json(issue: &LinkValidationIssue) -> serde_json::Value {
     })
 }
 
+/// Maps a library validation issue kind to its stable snake-case CLI identifier.
+///
+/// # Arguments
+///
+/// * `kind` - Exhaustive library inconsistency category to translate.
+///
+/// # Returns
+///
+/// The static snake-case label used by JSON output and interactive issue descriptions.
 pub(crate) fn validation_issue_kind(kind: LinkValidationIssueKind) -> &'static str {
     match kind {
         LinkValidationIssueKind::MissingOutgoingRecord => "missing_outgoing_record",
@@ -77,6 +118,16 @@ pub(crate) fn validation_issue_kind(kind: LinkValidationIssueKind) -> &'static s
     }
 }
 
+/// Prints a complete human-readable validation summary and detailed unresolved items.
+///
+/// # Arguments
+///
+/// * `report` - Report whose category counts, ignored counters, broken issues, and unavailable peers
+///   are written to stdout.
+///
+/// # Returns
+///
+/// Returns after all lines are emitted. Standard `println!` handling applies if stdout is closed.
 pub(super) fn print_validation_report(report: &LinkValidationReport) {
     println!("validation:");
     println!("  valid: {}", report.valid.len());
@@ -112,6 +163,20 @@ pub(super) fn print_validation_report(report: &LinkValidationReport) {
     }
 }
 
+/// Converts aggregate broken or unavailable report counts into the CLI's typed command error.
+///
+/// # Arguments
+///
+/// * `reports` - Any iterable of borrowed reports included in the current rendered command.
+///
+/// # Returns
+///
+/// `Ok(())` when every report has zero broken and unavailable items.
+///
+/// # Errors
+///
+/// Returns [`ValidationCommandError::Broken`] with the total broken count when nonzero; otherwise
+/// returns [`ValidationCommandError::Unavailable`] with the total unavailable count when nonzero.
 pub(super) fn ensure_validation_success<'a>(
     reports: impl IntoIterator<Item = &'a LinkValidationReport>,
 ) -> Result<()> {

@@ -1,3 +1,5 @@
+//! End-to-end CLI tests for container CRUD, links, validation, logging, and output contracts.
+
 #![cfg(unix)]
 
 use std::ffi::OsString;

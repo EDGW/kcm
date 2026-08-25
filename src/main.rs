@@ -186,6 +186,7 @@ mod tests {
             "/game",
             "list",
             "versions/",
+            "-R",
             "-vv",
             "--json",
         ])
@@ -197,6 +198,7 @@ mod tests {
             panic!("expected Destination list");
         };
         assert!(args.subcontainer.unwrap().requires_subcontainer());
+        assert!(args.recursive);
         assert_eq!(args.verbose, 2);
         assert!(args.json);
 
@@ -234,8 +236,18 @@ mod tests {
             "General container commands:",
             "Local container commands:",
             "Link container commands:",
+            "Configurable container commands:",
         ] {
             assert!(help.contains(heading));
+        }
+        for configurable_help in [
+            "using the first matching storage rule",
+            "recalculating its storage route",
+            "preserving its current storage class",
+            "Explicitly access or mutate the ordinary local namespace",
+            "Explicitly create an outgoing link",
+        ] {
+            assert!(help.contains(configurable_help));
         }
         for subcommand in container
             .get_subcommands()
@@ -264,6 +276,22 @@ mod tests {
             ContainerOperation::Init(InitArgs {
                 kind: ContainerKind::Configurable,
                 ..
+            })
+        ));
+    }
+
+    #[test]
+    fn parses_minecraft_destination_init() {
+        let cli =
+            Cli::try_parse_from(["kcm", "destination", "/game", "init", "minecraft"]).unwrap();
+        let Command::Destination(command) = cli.command else {
+            panic!("expected Destination command");
+        };
+        assert_eq!(command.path, std::path::PathBuf::from("/game"));
+        assert!(matches!(
+            command.operation,
+            DestinationOperation::Init(DestinationInitArgs {
+                kind: DestinationKind::Minecraft
             })
         ));
     }

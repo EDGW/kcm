@@ -108,6 +108,37 @@ fn json(output: &Output) -> Value {
 }
 
 #[test]
+fn minecraft_destination_init_uses_the_library_provider() {
+    let directory = TestDirectory::new();
+    let root = directory.join("minecraft");
+
+    let initialized = success([
+        OsString::from("destination"),
+        root.as_os_str().to_owned(),
+        OsString::from("init"),
+        OsString::from("minecraft"),
+    ]);
+    let output = String::from_utf8(initialized.stdout).unwrap();
+    assert!(output.contains("kind: minecraft\n"));
+
+    let destination_metadata: Value =
+        serde_json::from_slice(&fs::read(root.join(".kcl/destination.json")).unwrap()).unwrap();
+    assert_eq!(destination_metadata["kind"], "minecraft");
+    let cache_metadata: Value =
+        serde_json::from_slice(&fs::read(root.join(".kcl/mod-cache/.kcl/container.json")).unwrap())
+            .unwrap();
+    assert_eq!(cache_metadata["kind"], "local");
+
+    let listing = success([
+        OsString::from("destination"),
+        root.as_os_str().to_owned(),
+        OsString::from("list"),
+        OsString::from("--json"),
+    ]);
+    assert_eq!(json(&listing).as_array().unwrap().len(), 4);
+}
+
+#[test]
 fn locator_destination_and_configurable_crud_work_end_to_end() {
     let directory = TestDirectory::new();
     let destination_root = directory.join("destination");
@@ -167,6 +198,19 @@ fn locator_destination_and_configurable_crud_work_end_to_end() {
     ]);
     let nested_members = json(&nested_listing);
     assert_eq!(nested_members.as_array().unwrap().len(), 1);
+
+    let recursive_listing = success([
+        OsString::from("destination"),
+        destination_root.as_os_str().to_owned(),
+        OsString::from("list"),
+        OsString::from("-R"),
+        OsString::from("--json"),
+    ]);
+    let recursive_members = json(&recursive_listing);
+    assert_eq!(recursive_members.as_array().unwrap().len(), 5);
+    assert!(recursive_members.as_array().unwrap().iter().any(|member| {
+        member["member_type"] == "container" && member["logical_path"] == "group/nested"
+    }));
 
     let add = success(container(
         &version_locator,

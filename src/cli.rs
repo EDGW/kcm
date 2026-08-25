@@ -43,6 +43,19 @@ Link container commands:
   link-rename   Rename an outgoing link
   link-remove   Remove an outgoing link (alias: unlink)
 
+Configurable container commands:
+  add           Add an entry using the first matching storage rule
+  update        Replace or create an entry, recalculating its storage route
+  remove        Remove an entry using configurable link-safety rules
+  rename        Rename an entry while preserving its current storage class
+  copy          Copy an entry while preserving its current storage class
+  local-*       Explicitly access or mutate the ordinary local namespace
+  link          Explicitly create an outgoing link (subject to rule warning)
+  link-*        List, copy, rename, or remove outgoing links
+  read/path     Access an entry through its local or validated linked storage
+  linkinfo      Inspect incoming or outgoing link metadata
+  check         Validate and interactively repair link metadata and symlinks
+
 Arguments:
 {positionals}
 
@@ -105,7 +118,7 @@ impl From<LogLevel> for tracing::Level {
 pub(crate) enum Command {
     /// Inspect and operate on a kako-craft container.
     Container(ContainerCommand),
-    /// Inspect an explicit Destination and its catalog members.
+    /// Initialize or inspect an explicit Destination and its catalog members.
     Destination(DestinationCommand),
 }
 
@@ -122,21 +135,23 @@ pub(crate) struct ContainerCommand {
     pub(crate) operation: ContainerOperation,
 }
 
-/// Destination root followed by one read-only catalog operation.
+/// Destination root followed by one initialization or catalog operation.
 #[derive(Debug, Args)]
 pub(crate) struct DestinationCommand {
-    /// Destination filesystem root containing `.kcl/destination.json`.
+    /// Existing or new Destination filesystem root.
     #[arg(value_name = "DESTINATION-PATH")]
     pub(crate) path: PathBuf,
 
-    /// Read-only Destination operation.
+    /// Destination operation.
     #[command(subcommand)]
     pub(crate) operation: DestinationOperation,
 }
 
-/// Read-only Destination metadata and member-list operations.
+/// Destination initialization, metadata, and member-list operations.
 #[derive(Debug, Subcommand)]
 pub(crate) enum DestinationOperation {
+    /// Initialize a Destination.
+    Init(DestinationInitArgs),
     /// Show Destination metadata and root information.
     Info(JsonOutput),
     /// List direct Container and Subcontainer members together.
@@ -147,12 +162,31 @@ pub(crate) enum DestinationOperation {
     Subcontainers(DestinationListArgs),
 }
 
+/// Destination kind selected during initialization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum DestinationKind {
+    /// A managed Minecraft installation root.
+    Minecraft,
+}
+
+/// Arguments controlling Destination initialization.
+#[derive(Debug, Args)]
+pub(crate) struct DestinationInitArgs {
+    /// Concrete Destination provider kind.
+    #[arg(value_enum, value_name = "KIND")]
+    pub(crate) kind: DestinationKind,
+}
+
 /// Optional Subcontainer selection and output controls for Destination lists.
 #[derive(Debug, Args)]
 pub(crate) struct DestinationListArgs {
     /// Logical Subcontainer path; trailing `/` explicitly requires a Subcontainer.
     #[arg(value_name = "SUBCONTAINER-PATH")]
     pub(crate) subcontainer: Option<ContainerPath>,
+
+    /// Recursively include descendants of every declared Subcontainer.
+    #[arg(short = 'R', long)]
+    pub(crate) recursive: bool,
 
     /// Emit machine-readable JSON.
     #[arg(long)]

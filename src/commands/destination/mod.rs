@@ -1,7 +1,11 @@
-//! Read-only Destination metadata and catalog browsing commands.
+//! Destination initialization, metadata, and catalog browsing commands.
+
+mod lifecycle;
 
 use anyhow::Result;
-use kako_craft_lib::destination::{DestinationMember, DestinationMetadata, open_destination};
+use kako_craft_lib::destination::{
+    DestinationMember, DestinationMetadata, list_members, open_destination,
+};
 use kako_craft_lib::locator::resolve_subcontainer;
 use serde_json::json;
 
@@ -23,6 +27,7 @@ use crate::cli::{DestinationCommand, DestinationListArgs, DestinationOperation};
 /// resolution, member enumeration, or JSON serialization fails.
 pub(crate) fn run(command: DestinationCommand) -> Result<()> {
     match command.operation {
+        DestinationOperation::Init(args) => lifecycle::initialize(&command.path, args),
         DestinationOperation::Info(format) => print_info(&command.path, format.json),
         DestinationOperation::List(args) => print_members(&command.path, args, MemberFilter::All),
         DestinationOperation::Containers(args) => {
@@ -101,22 +106,17 @@ fn print_members(
 ) -> Result<()> {
     let destination = open_destination(path.to_owned())?;
     let node = resolve_subcontainer(destination.as_ref(), args.subcontainer.as_ref())?;
-    let mut members = Vec::new();
-    if matches!(filter, MemberFilter::All | MemberFilter::Containers) {
-        members.extend(
-            node.containers()?
-                .into_iter()
-                .map(DestinationMember::Container),
-        );
-    }
-    if matches!(filter, MemberFilter::All | MemberFilter::Subcontainers) {
-        members.extend(
-            node.subcontainers()?
-                .into_iter()
-                .map(DestinationMember::Subcontainer),
-        );
-    }
-    members.sort_by(|left, right| member_path(left).cmp(member_path(right)));
+    let members = list_members(node.as_ref(), args.recursive)?
+        .into_iter()
+        .filter(|member| match member {
+            DestinationMember::Container(_) => {
+                matches!(filter, MemberFilter::All | MemberFilter::Containers)
+            }
+            DestinationMember::Subcontainer(_) => {
+                matches!(filter, MemberFilter::All | MemberFilter::Subcontainers)
+            }
+        })
+        .collect::<Vec<_>>();
     if args.json {
         println!("{}", serde_json::to_string_pretty(&members)?);
     } else {
@@ -143,20 +143,4 @@ fn print_members(
         }
     }
     Ok(())
-}
-
-/// Returns a tagged member's logical sort key.
-///
-/// # Arguments
-///
-/// * `member` - Container or Subcontainer descriptor.
-///
-/// # Returns
-///
-/// Its borrowed logical path.
-fn member_path(member: &DestinationMember) -> &str {
-    match member {
-        DestinationMember::Container(member) => &member.logical_path,
-        DestinationMember::Subcontainer(member) => &member.logical_path,
-    }
 }

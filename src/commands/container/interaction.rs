@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use kako_craft_lib::container::{
@@ -10,6 +10,7 @@ use kako_craft_lib::container::{
     LinkCheckIssue, LinkCheckKind, LinkToError, LinkUnavailableError, LinkValidationReport,
     UnlinkToError, WriterError, open_container,
 };
+use kako_craft_lib::locator::ContainerLocator;
 
 use crate::cli::CheckArgs;
 
@@ -60,7 +61,7 @@ pub(crate) struct CheckInteractionOutcome {
 /// cannot be acquired, checking fails, or terminal interaction cannot complete.
 pub(crate) fn run_check_interaction(
     path: &Path,
-    validate_with: &[PathBuf],
+    validate_with: &[ContainerLocator],
 ) -> Result<CheckInteractionOutcome> {
     let container = open_container(path)?;
     let corresponding = open_corresponding(validate_with)?;

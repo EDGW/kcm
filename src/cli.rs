@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 use kako_craft_lib::container::EntryKey;
+use kako_craft_lib::locator::{ContainerLocator, ContainerPath};
 
 /// Custom long-help layout grouping general, local, and link-container operations.
 const CONTAINER_HELP_TEMPLATE: &str = "\
@@ -63,6 +64,10 @@ pub(crate) struct Cli {
     #[arg(long, value_enum, global = true, value_name = "LEVEL")]
     pub(crate) log_level: Option<LogLevel>,
 
+    /// Accept storage-property warnings without prompting.
+    #[arg(short = 'y', long, global = true)]
+    pub(crate) yes: bool,
+
     #[command(subcommand)]
     /// Selected top-level command family and its parsed arguments.
     pub(crate) command: Command,
@@ -100,19 +105,62 @@ impl From<LogLevel> for tracing::Level {
 pub(crate) enum Command {
     /// Inspect and operate on a kako-craft container.
     Container(ContainerCommand),
+    /// Inspect an explicit Destination and its catalog members.
+    Destination(DestinationCommand),
 }
 
 #[derive(Debug, Args)]
 #[command(help_template = CONTAINER_HELP_TEMPLATE)]
-/// Container root followed by one structured container operation.
+/// Container locator followed by one structured container operation.
 pub(crate) struct ContainerCommand {
-    /// Container directory. Defaults to the current directory.
-    #[arg(value_name = "PATH", default_value = ".")]
-    pub(crate) path: PathBuf,
+    /// Destination and logical Container locator, such as `:./container`.
+    #[arg(value_name = "LOCATOR")]
+    pub(crate) locator: ContainerLocator,
 
     #[command(subcommand)]
-    /// Operation to execute against `path`.
+    /// Operation to execute against `locator`.
     pub(crate) operation: ContainerOperation,
+}
+
+/// Destination root followed by one read-only catalog operation.
+#[derive(Debug, Args)]
+pub(crate) struct DestinationCommand {
+    /// Destination filesystem root containing `.kcl/destination.json`.
+    #[arg(value_name = "DESTINATION-PATH")]
+    pub(crate) path: PathBuf,
+
+    /// Read-only Destination operation.
+    #[command(subcommand)]
+    pub(crate) operation: DestinationOperation,
+}
+
+/// Read-only Destination metadata and member-list operations.
+#[derive(Debug, Subcommand)]
+pub(crate) enum DestinationOperation {
+    /// Show Destination metadata and root information.
+    Info(JsonOutput),
+    /// List direct Container and Subcontainer members together.
+    List(DestinationListArgs),
+    /// List direct Container members only.
+    Containers(DestinationListArgs),
+    /// List direct Subcontainer members only.
+    Subcontainers(DestinationListArgs),
+}
+
+/// Optional Subcontainer selection and output controls for Destination lists.
+#[derive(Debug, Args)]
+pub(crate) struct DestinationListArgs {
+    /// Logical Subcontainer path; trailing `/` explicitly requires a Subcontainer.
+    #[arg(value_name = "SUBCONTAINER-PATH")]
+    pub(crate) subcontainer: Option<ContainerPath>,
+
+    /// Emit machine-readable JSON.
+    #[arg(long)]
+    pub(crate) json: bool,
+
+    /// Increase detail; repeat to include paths and initialization state.
+    #[arg(short, long, action = ArgAction::Count)]
+    pub(crate) verbose: u8,
 }
 
 #[derive(Debug, Subcommand)]
@@ -239,7 +287,7 @@ pub(crate) struct ListOptions {
         action = ArgAction::Append,
         requires = "link_info"
     )]
-    pub(crate) validate_with: Vec<PathBuf>,
+    pub(crate) validate_with: Vec<ContainerLocator>,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -249,6 +297,8 @@ pub(crate) enum ContainerKind {
     Local,
     /// Container supporting ordinary entries plus validated outgoing links.
     Link,
+    /// Rule-routed link-capable Container.
+    Configurable,
 }
 
 #[derive(Debug, Args)]
@@ -332,7 +382,7 @@ pub(crate) struct LinkArgs {
     pub(crate) linker_key: EntryKey,
 
     /// Path to the target container.
-    pub(crate) target_container: PathBuf,
+    pub(crate) target_container: ContainerLocator,
 
     /// Entry key in the target container.
     pub(crate) target_key: EntryKey,
@@ -383,7 +433,7 @@ pub(crate) struct LinkInfoArgs {
 
     /// Validate reciprocal metadata against one or more containers.
     #[arg(long, value_name = "PATH", num_args = 1.., action = ArgAction::Append)]
-    pub(crate) validate_with: Vec<PathBuf>,
+    pub(crate) validate_with: Vec<ContainerLocator>,
 
     /// Emit machine-readable JSON.
     #[arg(long)]
@@ -399,7 +449,7 @@ pub(crate) struct LinkInfoArgs {
 pub(crate) struct CheckArgs {
     /// Check reciprocal metadata against one or more containers.
     #[arg(long, value_name = "PATH", num_args = 1.., action = ArgAction::Append)]
-    pub(crate) validate_with: Vec<PathBuf>,
+    pub(crate) validate_with: Vec<ContainerLocator>,
 }
 
 impl LinkArgs {

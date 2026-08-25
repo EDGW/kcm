@@ -13,9 +13,11 @@ use crate::cli::*;
 
 pub(crate) mod interaction;
 pub(crate) mod render;
+pub(crate) mod tests;
 
 use interaction::*;
 use render::*;
+use tests::run_container_tests;
 
 /// Dispatches one parsed top-level invocation to its command-family handler.
 ///
@@ -130,6 +132,7 @@ fn run_container(command: ContainerCommand) -> Result<()> {
         ContainerOperation::LinkRename(args) => link_rename(&path, args),
         ContainerOperation::LinkRemove(args) => unlink(&path, args),
         ContainerOperation::LinkInfo(args) => link_info(&path, args),
+        ContainerOperation::Tests(command) => run_container_tests(command),
     }
 }
 

@@ -18,6 +18,7 @@ General container commands:
   path          Resolve an entry's filesystem path
   linkinfo      Show the link metadata recorded for an entry (alias: link-info)
   check         Check link metadata and symlinks, then interactively repair issues
+  tests         Generate container fixtures for diagnostic testing
 
 Local container commands:
   add           Add a new entry
@@ -176,6 +177,31 @@ pub(crate) enum ContainerOperation {
     /// Show the link metadata recorded for an entry.
     #[command(name = "linkinfo", visible_alias = "link-info")]
     LinkInfo(LinkInfoArgs),
+    /// Generate container fixtures for testing diagnostics.
+    Tests(ContainerTestsCommand),
+}
+
+/// Nested operations that deliberately create container test fixtures.
+#[derive(Debug, Args)]
+pub(crate) struct ContainerTestsCommand {
+    /// Fixture-generation operation to execute.
+    #[command(subcommand)]
+    pub(crate) operation: ContainerTestsOperation,
+}
+
+/// Container fixture generators exposed by `kcm container tests`.
+#[derive(Debug, Subcommand)]
+pub(crate) enum ContainerTestsOperation {
+    /// Generate linked containers covering reproducible broken-link error types.
+    NewBroken(NewBrokenArgs),
+}
+
+/// Destination arguments for the broken-container fixture generator.
+#[derive(Debug, Args)]
+pub(crate) struct NewBrokenArgs {
+    /// New root under which isolated broken-container scenarios are created.
+    #[arg(value_name = "PATH", default_value = "broken-containers")]
+    pub(crate) path: PathBuf,
 }
 
 #[derive(Debug, Args)]

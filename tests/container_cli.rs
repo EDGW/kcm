@@ -617,6 +617,7 @@ fn help_exposes_groups_aliases_and_every_subcommand_detail() {
         "link-copy",
         "link-rename",
         "link-remove",
+        "tests",
     ] {
         assert!(help.contains(&format!("  {command}")));
         let detail = run(&words(&["container", "help", command]), None);
@@ -628,4 +629,67 @@ fn help_exposes_groups_aliases_and_every_subcommand_detail() {
     }
     assert!(help.contains("alias: link-info"));
     assert!(help.contains("alias: unlink"));
+}
+
+#[test]
+fn new_broken_generates_and_prints_verified_error_types() {
+    let temporary = TestDirectory::new("new-broken");
+    let fixtures = temporary.join("fixtures");
+    let output = run(
+        &[
+            OsString::from("container"),
+            OsString::from("tests"),
+            OsString::from("new-broken"),
+            fixtures.as_os_str().to_owned(),
+        ],
+        None,
+    );
+    assert!(
+        output.status.success(),
+        "new-broken failed: {}",
+        stderr(&output)
+    );
+    let output = stdout(&output);
+    assert!(output.contains(&format!("created: {}", fixtures.display())));
+    for error in [
+        "validation.missing_outgoing_record",
+        "validation.unexpected_outgoing_record",
+        "validation.missing_incoming_record",
+        "validation.unexpected_incoming_record",
+        "validation.linker_uid_mismatch",
+        "validation.target_uid_mismatch",
+        "validation.linker_key_mismatch",
+        "validation.target_key_mismatch",
+        "validation.target_entry_missing",
+        "validation.container_path_missing",
+        "validation.container_path_mismatch",
+        "validation.container_path_uid_mismatch",
+        "validation.duplicate_incoming_record",
+        "validation.metadata_invalid",
+        "validation.materialized_symlink_missing",
+        "validation.materialized_symlink_mismatch",
+        "check.missing_symlink",
+        "check.incorrect_symlink",
+        "check.unrecorded_symlink",
+    ] {
+        assert!(output.contains(error), "output is missing {error}");
+    }
+    assert!(output.contains("uncovered validation types: 1"));
+    assert!(output.contains("validation.duplicate_outgoing_record"));
+    assert!(
+        open_container(fixtures.join("missing-outgoing/target")).is_ok(),
+        "generated fixture should contain real reopenable containers"
+    );
+
+    let repeated = run(
+        &[
+            OsString::from("container"),
+            OsString::from("tests"),
+            OsString::from("new-broken"),
+            fixtures.as_os_str().to_owned(),
+        ],
+        None,
+    );
+    assert_eq!(repeated.status.code(), Some(1));
+    assert!(stderr(&repeated).contains("refusing to create"));
 }

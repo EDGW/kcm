@@ -228,6 +228,33 @@ mod tests {
     }
 
     #[test]
+    fn parses_nested_broken_container_fixture_command() {
+        let cli = Cli::try_parse_from([
+            "kcm",
+            "container",
+            "tests",
+            "new-broken",
+            "diagnostic-fixtures",
+        ])
+        .unwrap();
+        let Command::Container(command) = cli.command;
+        assert_eq!(command.path, PathBuf::from("."));
+        let ContainerOperation::Tests(tests) = command.operation else {
+            panic!("expected container tests command");
+        };
+        let ContainerTestsOperation::NewBroken(args) = tests.operation;
+        assert_eq!(args.path, PathBuf::from("diagnostic-fixtures"));
+
+        let cli = Cli::try_parse_from(["kcm", "container", "tests", "new-broken"]).unwrap();
+        let Command::Container(command) = cli.command;
+        let ContainerOperation::Tests(tests) = command.operation else {
+            panic!("expected container tests command");
+        };
+        let ContainerTestsOperation::NewBroken(args) = tests.operation;
+        assert_eq!(args.path, PathBuf::from("broken-containers"));
+    }
+
+    #[test]
     fn parses_all_visible_and_compatibility_aliases() {
         for arguments in [
             vec!["kcm", "container", "get", "entry"],
